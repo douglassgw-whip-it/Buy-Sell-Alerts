@@ -26,5 +26,7 @@ jobs:
 
     - name: Run Screener Script
       env:
-        EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        TO_EMAIL: ${{ secrets.TO_EMAIL }}
       run: python screener.py
