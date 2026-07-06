@@ -73,7 +73,7 @@ def send_matrix_email(matrix_text):
         raise ValueError("❌ CRITICAL CONFIG: EMAIL_PASSWORD environment variable is missing.")
 
     msg = MIMEMultipart()
-    msg["Subject"] = "📊 UNLOCKED SYSTEMATIC TOTAL-MARKET OPTIONS MATRIX"
+    msg["Subject"] = "📊 SYSTEMATIC BROAD INDEX SCORING MATRIX"
     msg["From"] = smtp_user
     msg["To"] = to_email
     
@@ -88,40 +88,44 @@ def send_matrix_email(matrix_text):
     print("✨ SUCCESS: Macro Matrix data package emailed successfully!")
 
 # ==========================================
-# 4. EXECUTION DISPATCH MATRIX (BATCH DRIVEN)
+# 4. EXECUTION DISPATCH MATRIX
 # ==========================================
 def main():
     print("🚀 BOOTING BROAD NETWORK INDEX EXTRACTION PROCESSING ENGINE")
     
+    # Download single baseline reference benchmark to avoid any structural errors
+    spy_df = yf.download("SPY", period="1y", interval="1d", progress=False, multi_level_index=False)
+    spy_df.columns = [str(col).strip() for col in spy_df.columns]
+    spy_close = spy_df['Close'].dropna()
+    spy_returns = spy_close.pct_change().dropna()
+    spy_cum = (1 + spy_returns).prod() - 1
+    spy_vol_20d = spy_returns.tail(20).std() * np.sqrt(252)
+
     watchlist = fetch_broad_market_universe()
     
-    print("Executing single massive batch download to prevent cloud rate-limiting...")
-    all_data = yf.download(watchlist + ["SPY"], period="1y", interval="1d", progress=False)
+    print("Initializing robust batch fetch engine...")
+    batch_tickers = yf.Tickers(" ".join(watchlist))
     
-    try:
-        spy_close = all_data['Close']['SPY'].dropna()
-        spy_returns = spy_close.pct_change().dropna()
-        spy_cum = (1 + spy_returns).prod() - 1
-        spy_vol_20d = spy_returns.tail(20).std() * np.sqrt(252)
-    except Exception as e:
-        print(f"❌ Failed to parse SPY benchmark data: {e}")
-        return
-
     group_a_pool = []
     group_b_pool = []
 
-    print("Processing metrics from batch footprint...")
+    print("Extracting metrics from individual dataset footprints...")
     for ticker in watchlist:
         if ticker == "SPY":
             continue
         try:
-            close_series = all_data['Close'][ticker].dropna()
-            volume_series = all_data['Volume'][ticker].dropna()
-            high_series = all_data['High'][ticker].dropna()
-            low_series = all_data['Low'][ticker].dropna()
-            
-            if len(close_series) < 50:
+            # Safely fetch each ticker's dedicated DataFrame directly from the batch object
+            df = batch_tickers.tickers[ticker].history(period="1y", interval="1d", raised=False)
+            if df.empty or len(df) < 50:
                 continue
+
+            # Ensure consistent column naming format
+            df.columns = [str(col).strip() for col in df.columns]
+            
+            close_series = df['Close'].dropna()
+            volume_series = df['Volume'].dropna()
+            high_series = df['High'].dropna()
+            low_series = df['Low'].dropna()
 
             # 1. LIQUIDITY FILTER
             avg_volume_10d = volume_series.tail(10).mean()
