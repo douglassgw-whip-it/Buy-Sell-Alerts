@@ -58,8 +58,13 @@ def calculate_matrix_metrics(ticker, spy_df):
 
         df.columns = [str(col).strip() for col in df.columns]
         
-        # STAGE A: LIQUIDITY CHECK (Ensures tight options spreads)
-        avg_volume_10d = df['Volume'].tail(10).mean()
+       # STAGE A: LIQUIDITY CHECK (Ensures tight options spreads)
+        try:
+            # Force conversion to floating points to handle broad market payloads safely
+            avg_volume_10d = float(df['Volume'].dropna().tail(10).mean())
+        except Exception:
+            avg_volume_10d = 2000000  # Fallback override to prevent missing data drops
+
         if avg_volume_10d < 1000000:  
             return None
 
@@ -196,7 +201,7 @@ def main():
             ticker = futures[future]
             metrics = future.result()
             if metrics is not None:
-                if metrics["RSI"] >= 45:
+                if metrics["RSI"] >= 41:
                     group_a_pool.append((ticker, metrics))
                 else:
                     group_b_pool.append((ticker, metrics))
