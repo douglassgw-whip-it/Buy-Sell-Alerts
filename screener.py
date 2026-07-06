@@ -13,7 +13,6 @@ def fetch_broad_market_universe():
     print("Executing broad extraction of institutional indices...")
     tickers = []
     
-    # Track 1: S&P 500 via GitHub Raw Data-Hub Mirror (100% stable inside GitHub Actions)
     try:
         sp500_df = pd.read_csv("https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv")
         sp500_list = sp500_df['Symbol'].tolist()
@@ -30,7 +29,6 @@ def fetch_broad_market_universe():
         except Exception as e2:
             print(f"❌ All S&P 500 mirrors bypassed: {e2}")
 
-    # Track 2: NASDAQ-100 via Top-Tickers GitHub Mirror
     try:
         nasdaq_df = pd.read_csv("https://raw.githubusercontent.com/Ate329/top-us-stock-tickers/main/tickers/top_100.csv")
         col = 'symbol' if 'symbol' in nasdaq_df.columns else 'Symbol'
@@ -40,31 +38,36 @@ def fetch_broad_market_universe():
     except Exception as e:
         print(f"❌ NASDAQ-100 mirror bypassed: {e}")
 
-    # Manual Watchlist Fallbacks
     macro_anchors = ["QQQ", "IWM", "DIA", "RKLB", "PLTR", "BBAI", "VLN", "ACHR"]
     full_universe = list(set(macro_anchors + tickers))
     print(f"📊 Total dynamic components integrated into the pipeline: {len(full_universe)}")
     return full_universe
 
 # ==========================================
-# 2. REPORT FORMATTING PIPELINE
+# 2. REPORT FORMATTING PIPELINE (CLEANED UP & ALIGNED)
 # ==========================================
 def build_markdown_matrix(group_a, group_b):
-    output = "=== SYSTEMATIC BROAD INDEX SCORING MATRIX ===\n\n"
+    output = "## SYSTEMATIC BROAD INDEX SCORING MATRIX\n"
+    output += "=======================================================================\n\n"
     
-    output += " GROUP A: ALPHA MOMENTUM BREAKOUTS (Call Targets) -- [Filter: High Liquid + Low IV Setup]\n"
-    output += "| Ticker | Price   | Ann Alpha | 20D Vol | Daily RSI | IV Rank | Tactical Score |\n"
-    output += "| -------- | ------- | --------- | ------- | --------- | ------- | -------------- |\n"
+    output += "### 📈 GROUP A: ALPHA MOMENTUM BREAKOUTS (Call Targets)\n"
+    output += "*Filter: High Liquidity + Low IV Setup*\n\n"
+    output += "| Ticker | Price     | Ann Alpha | 20D Vol | Daily RSI | IV Rank | Tactical Score |\n"
+    output += "| :---   | :---      | :---      | :---    | :---      | :---    | :---           |\n"
     for t, m in group_a:
-        output += f"| {t:<6} | {m['Price']:<7} | {m['Alpha']:+7.1%} | {m['Vol']:<7} | {m['RSI']:<9} | {m['HVRank']:<7} | {m['ScoreA']:<14} |\n"
+        output += f"| {t:<6} | {m['Price']:<9} | {m['Alpha']:+9.1%} | {m['Vol']:<7} | {m['RSI']:<9} | {m['HVRank']:<7} | {m['ScoreA']:<14} |\n"
         
-    output += "\n GROUP B: STRUCTURAL PULLBACKS (Put Selling Income) -- [Filter: High Vol Premium + Margin Floor]\n"
-    output += "| Ticker | Price   | Ann Alpha | Daily RSI | 20D Vol | IV Rank | Suggested Strike Floor | Put selling Score |\n"
-    output += "| -------- | ------- | --------- | --------- | ------- | ------- | ---------------------- | ----------------- |\n"
+    output += "\n" + "---" * 20 + "\n\n"
+    
+    output += "### 📉 GROUP B: STRUCTURAL PULLBACKS (Put Selling Income)\n"
+    output += "*Filter: High Vol Premium + Margin Floor*\n\n"
+    output += "| Ticker | Price     | Ann Alpha | Daily RSI | 20D Vol | IV Rank | Suggested Strike Floor | Put Selling Score |\n"
+    output += "| :---   | :---      | :---      | :---      | :---    | :---    | :---                   | :---              |\n"
     for t, m in group_b:
-        output += f"| {t:<6} | {m['Price']:<7} | {m['Alpha']:+7.1%} | {m['RSI']:<9} | {m['Vol']:<7} | {m['HVRank']:<7} | {m['StrikeFloor']:<22} | {m['ScoreB']:<17} |\n"
+        output += f"| {t:<6} | {m['Price']:<9} | {m['Alpha']:+9.1%} | {m['RSI']:<9} | {m['Vol']:<7} | {m['HVRank']:<7} | {m['StrikeFloor']:<22} | {m['ScoreB']:<17} |\n"
 
-    output += "\nAutomated Data Pipeline Engine via GitHub Cloud Workspace Universe Engine"
+    output += "\n=======================================================================\n"
+    output += "🤖 *Automated Data Pipeline Engine via GitHub Cloud Workspace Universe Engine*"
     return output
 
 # ==========================================
@@ -99,7 +102,6 @@ def send_matrix_email(matrix_text):
 def main():
     print("🚀 BOOTING BROAD NETWORK INDEX EXTRACTION PROCESSING ENGINE")
     
-    # Establish baseline benchmark index metrics
     spy_df = yf.download("SPY", period="1y", interval="1d", progress=False, multi_level_index=False)
     spy_df.columns = [str(col).strip() for col in spy_df.columns]
     spy_close = spy_df['Close'].dropna()
@@ -111,7 +113,6 @@ def main():
     if "SPY" not in watchlist:
         watchlist.append("SPY")
         
-    # Split the massive universe into batches of 100 tickers to safely bypass Yahoo limits
     chunk_size = 100
     all_data_chunks = []
     
@@ -129,7 +130,6 @@ def main():
         print("❌ CRITICAL ERROR: Could not collect any market dataset entries.")
         return
         
-    # Merge all chunked frames horizontally across columns
     all_data = pd.concat(all_data_chunks, axis=1)
     
     group_a_pool = []
@@ -152,7 +152,6 @@ def main():
             high_series = ticker_df['High']
             low_series = ticker_df['Low']
 
-            # 1. LIQUIDITY FILTER (Ensures standard institutional options volume)
             avg_volume_10d = volume_series.tail(10).mean()
             if avg_volume_10d < 1000000:
                 continue
@@ -160,20 +159,18 @@ def main():
             combined_stock_spy = pd.concat([close_series.rename('Stock'), spy_close.rename('SPY')], axis=1).dropna()
             stock_returns = combined_stock_spy['Stock'].pct_change().dropna()
             
-            # 2. ANNUALIZED ALPHA
             stock_cum = (1 + stock_returns).prod() - 1
             alpha = stock_cum - spy_cum
 
-            # 3. 20-DAY RELATIVE VOLATILITY
             stock_vol_20d = stock_returns.tail(20).std() * np.sqrt(252)
             relative_vol = stock_vol_20d / spy_vol_20d if spy_vol_20d > 0 else 1.0
 
-            # 4. HISTORICAL VOLATILITY (HV) RANK
-            rolling_20d_vol = stock_returns.rolling(20).std() * np.sqrt(252)
-            hv_min, hv_max = rolling_20d_vol.min(), rolling_20d_vol.max()
+            # ⚙️ UPDATED: Smoothed 60-day window baseline to normalize IV Rank skews
+            rolling_60d_vol = stock_returns.rolling(60).std() * np.sqrt(252)
+            hv_min, hv_max = rolling_60d_vol.min(), rolling_60d_vol.max()
             hv_rank = ((stock_vol_20d - hv_min) / (hv_max - hv_min)) if (hv_max - hv_min) > 0 else 0.5
+            hv_rank = np.clip(hv_rank, 0.0, 1.0) # Keeps values perfectly bounded between 0% and 100%
 
-            # 5. 14-DAY RSI
             delta = combined_stock_spy['Stock'].diff()
             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
@@ -181,7 +178,6 @@ def main():
             latest_price = combined_stock_spy['Stock'].iloc[-1]
             latest_rsi = rsi_series.iloc[-1] if not np.isnan(rsi_series.iloc[-1]) else 50.0
 
-            # 6. ATR & SAFETY MARGIN
             high_low = high_series - low_series
             high_close = (high_series - close_series.shift()).abs()
             low_close = (low_series - close_series.shift()).abs()
@@ -189,7 +185,6 @@ def main():
             atr = true_range.rolling(14).mean().iloc[-1]
             suggested_strike_margin = latest_price - (2 * atr)
 
-            # 7. METRIC MATCH SCORING
             score_a = 0
             if latest_rsi > 55: score_a += 1
             if alpha > 0.05: score_a += 1
