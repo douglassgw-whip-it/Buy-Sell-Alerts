@@ -50,8 +50,8 @@ def build_markdown_matrix(group_a, group_b):
     output = "## SYSTEMATIC BROAD INDEX SCORING MATRIX\n"
     output += "=======================================================================\n\n"
     
-    output += "### 📈 GROUP A: ALPHA MOMENTUM BREAKOUTS (Call Targets)\n"
-    output += "*Filter: High Liquidity + Low IV Setup*\n\n"
+    output += "### 📈 GROUP A: ALPHA MOMENTUM BREAKOUTS\n"
+    output += "*Filter: Daily RSI >= 45*\n\n"
     output += "| Ticker | Price     | Ann Alpha | 20D Vol | Daily RSI | IV Rank | Tactical Score |\n"
     output += "| :---   | :---      | :---      | :---    | :---      | :---    | :---           |\n"
     for t, m in group_a:
@@ -59,8 +59,8 @@ def build_markdown_matrix(group_a, group_b):
         
     output += "\n" + "---" * 20 + "\n\n"
     
-    output += "### 📉 GROUP B: STRUCTURAL PULLBACKS (Put Selling Income)\n"
-    output += "*Filter: High Vol Premium + Margin Floor*\n\n"
+    output += "### 📉 GROUP B: STRUCTURAL PULLBACKS\n"
+    output += "*Filter: Daily RSI < 45*\n\n"
     output += "| Ticker | Price     | Ann Alpha | Daily RSI | 20D Vol | IV Rank | Suggested Strike Floor | Put Selling Score |\n"
     output += "| :---   | :---      | :---      | :---      | :---    | :---    | :---                   | :---              |\n"
     for t, m in group_b:
@@ -71,22 +71,23 @@ def build_markdown_matrix(group_a, group_b):
     return output
 
 # ==========================================
-# 3. PORT 465 SSL DISPATCH PIPELINE
+# 3. SECURE REPO-SECRETS SMTP TUNNEL
 # ==========================================
 def send_matrix_email(matrix_text):
-    smtp_user = "douglassgw@gmail.com"  
-    to_email = "douglassgw@gmail.com"   
+    # Fixed to pull exactly from the keys established in image_a68fdf.png
+    smtp_user = os.environ.get("EMAIL_USER")
     smtp_pass = os.environ.get("EMAIL_PASSWORD")
+    to_email = os.environ.get("TO_EMAIL")
 
-    if not smtp_pass:
-        raise ValueError("❌ CRITICAL CONFIG: EMAIL_PASSWORD environment variable is missing.")
+    if not all([smtp_user, smtp_pass, to_email]):
+        raise ValueError("❌ CRITICAL CONFIG: Missing core environment secrets (EMAIL_USER, EMAIL_PASSWORD, TO_EMAIL).")
 
     msg = MIMEMultipart()
     msg["Subject"] = "📊 SYSTEMATIC BROAD INDEX SCORING MATRIX"
     msg["From"] = smtp_user
     msg["To"] = to_email
     
-    body = f"Total-market multi-index macro scan complete. Optimized options setups:\n\n{matrix_text}"
+    body = f"Total-market multi-index macro scan complete. Optimized setups:\n\n{matrix_text}"
     msg.attach(MIMEText(body, "plain"))
 
     print("Opening secure SSL pipeline tunnel...")
@@ -94,7 +95,7 @@ def send_matrix_email(matrix_text):
     server.login(smtp_user, smtp_pass)
     server.sendmail(smtp_user, to_email, msg.as_string())
     server.quit()
-    print("✨ SUCCESS: Report delivered.")
+    print("✨ SUCCESS: Report delivered securely.")
 
 # ==========================================
 # 4. EXECUTION DISPATCH MATRIX
@@ -102,8 +103,10 @@ def send_matrix_email(matrix_text):
 def main():
     print("🚀 BOOTING BROAD NETWORK INDEX EXTRACTION PROCESSING ENGINE")
     
-    spy_df = yf.download("SPY", period="1y", interval="1d", progress=False, multi_level_index=False)
-    spy_df.columns = [str(col).strip() for col in spy_df.columns]
+    spy_df = yf.download("SPY", period="1y", interval="1d", progress=False)
+    if isinstance(spy_df.columns, pd.MultiIndex):
+        spy_df.columns = spy_df.columns.get_level_values(0)
+    
     spy_close = spy_df['Close'].dropna()
     spy_returns = spy_close.pct_change().dropna()
     spy_cum = (1 + spy_returns).prod() - 1
@@ -113,39 +116,21 @@ def main():
     if "SPY" not in watchlist:
         watchlist.append("SPY")
         
-    chunk_size = 100
-    all_data_chunks = []
-    
-    print(f"Downloading data footprints in controlled chunks of {chunk_size}...")
-    for i in range(0, len(watchlist), chunk_size):
-        chunk = watchlist[i:i + chunk_size]
-        try:
-            chunk_data = yf.download(chunk, period="1y", interval="1d", progress=False, group_by="ticker")
-            if not chunk_data.empty:
-                all_data_chunks.append(chunk_data)
-        except Exception as e:
-            print(f"⚠️ Batch block processing skipped: {e}")
-            
-    if not all_data_chunks:
-        print("❌ CRITICAL ERROR: Could not collect any market dataset entries.")
-        return
-        
-    all_data = pd.concat(all_data_chunks, axis=1)
-    
     group_a_pool = []
     group_b_pool = []
 
-    print("Parsing down individual historical footprints from local data memory...")
+    print("Parsing down individual historical footprints...")
     for ticker in watchlist:
         if ticker == "SPY":
             continue
         try:
-            if ticker not in all_data.columns.levels[0]:
+            # Individual calls handle data structuring bugs cleaner across large indices
+            ticker_df = yf.download(ticker, period="1y", interval="1d", progress=False)
+            if ticker_df.empty or len(ticker_df) < 50:
                 continue
                 
-            ticker_df = all_data[ticker].dropna(subset=["Close"])
-            if len(ticker_df) < 50:
-                continue
+            if isinstance(ticker_df.columns, pd.MultiIndex):
+                ticker_df.columns = ticker_df.columns.get_level_values(0)
 
             close_series = ticker_df['Close']
             volume_series = ticker_df['Volume']
@@ -165,7 +150,7 @@ def main():
             stock_vol_20d = stock_returns.tail(20).std() * np.sqrt(252)
             relative_vol = stock_vol_20d / spy_vol_20d if spy_vol_20d > 0 else 1.0
 
-            # ⚙️ FIXED VOLATILITY ENGINE: Applies dynamic 1-Year percentile ranking
+            # Volatility engine mapping
             historical_20d_vols = stock_returns.rolling(20).std() * np.sqrt(252)
             current_20d_vol = historical_20d_vols.iloc[-1]
 
