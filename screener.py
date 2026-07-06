@@ -91,8 +91,8 @@ def send_matrix_email(matrix_text):
 def main():
     print("🚀 DISPATCHING OPTIONS DATA SCREENING PIPELINE")
     
-    # SPY Total Return Baseline Tracking
-    spy_df = yf.download("SPY", period="1y", interval="1d", progress=False)
+    # SPY Total Return Baseline Tracking - Forced auto_adjust=False to maintain explicit 'Adj Close'
+    spy_df = yf.download("SPY", period="1y", interval="1d", progress=False, auto_adjust=False)
     if isinstance(spy_df.columns, pd.MultiIndex):
         spy_df.columns = spy_df.columns.get_level_values(0)
     spy_close = spy_df['Adj Close'].dropna()
@@ -106,20 +106,21 @@ def main():
         if ticker == "SPY":
             continue
         try:
-            ticker_df = yf.download(ticker, period="1y", interval="1d", progress=False)
+            # Forced auto_adjust=False to bring back standard 'Adj Close' column structure and bypass KeyError
+            ticker_df = yf.download(ticker, period="1y", interval="1d", progress=False, auto_adjust=False)
             if ticker_df.empty or len(ticker_df) < 60:
                 continue
                 
             if isinstance(ticker_df.columns, pd.MultiIndex):
                 ticker_df.columns = ticker_df.columns.get_level_values(0)
 
-            # --- FIXED TO ADJ CLOSE TO FACTOR IN ALL HIGH-YIELD DISTRIBUTIONS/DIVIDENDS ---
+            # --- TARGET CHANNELS IN THE DATAFRAME ---
             close_series = ticker_df['Adj Close']
             volume_series = ticker_df['Volume']
             high_series = ticker_df['High']
             low_series = ticker_df['Low']
 
-            # --- LIQUIDITY GATE: Filter out tickers with illiquid options chain markers ---
+            # --- LIQUIDITY GATE: Ensure high volume options ecosystems ---
             avg_volume_20d = volume_series.tail(20).mean()
             if avg_volume_20d < 2500000:
                 continue
@@ -132,7 +133,6 @@ def main():
             alpha = stock_cum - spy_cum
 
             # --- OPTIONS EXPIRE IN 30-45 DAYS: TRACK TRADING WINDOW IMPLIED VOLATILITY (IV) PROXY ---
-            # Calculates daily log returns and rolls a 30-day trading window to match the option duration
             daily_log_returns = np.log(close_series / close_series.shift(1)).dropna()
             rolling_30d_vol = daily_log_returns.rolling(window=30).std() * np.sqrt(252)
             current_30d_iv_proxy = rolling_30d_vol.iloc[-1]
@@ -156,19 +156,19 @@ def main():
             atr_14 = true_range.rolling(14).mean().iloc[-1]
 
             # Strategy Math for Expiration Strikes
-            strike_floor = current_price - (2 * atr_14) # 2 ATR buffer down for Put Sales
-            target_strike = current_price + (1 * atr_14) # 1 ATR target up for Long Calls
+            strike_floor = current_price - (2 * atr_14) # 2 ATR safety margin for selling Puts
+            target_strike = current_price + (1 * atr_14) # 1 ATR breakout target for Calls
 
             # ==========================================
             # STRATEGY RISK SCORING MECHANISM
             # ==========================================
-            # Group A: Call Option Setups (RSI over 50, wants lower IV Rank to protect from severe premium crush)
+            # Group A: Call Option Setups (RSI >= 50)
             if current_rsi >= 50:
                 score_a = 0
-                if current_rsi > 55 and current_rsi < 70: score_a += 1  # In the breakout sweet spot, not overextended
-                if alpha > 0.05: score_a += 1                         # Outperforming benchmark
-                if iv_rank_proxy < 0.45: score_a += 1                 # Premium is cheap, safe to buy directional exposure
-                
+                if 55 < current_rsi < 70: score_a += 1  # Strong trend but not overextended
+                if alpha > 0.05: score_a += 1           # Positive alpha performance
+                if iv_rank_proxy < 0.45: score_a += 1   # Premium is structurally cheap to buy
+
                 metrics = {
                     "Price": f"${current_price:,.2f}", "Alpha": alpha, "RSI": int(current_rsi),
                     "IVRank": f"{iv_rank_proxy * 100:.0f}%", "TargetStrike": f"${target_strike:,.2f}",
@@ -176,13 +176,13 @@ def main():
                 }
                 group_a_pool.append((ticker, metrics))
 
-            # Group B: Put Selling Income Setups (RSI under 50, wants bloated IV Rank to extract maximum premium)
+            # Group B: Put Selling Income Setups (RSI < 50)
             else:
                 score_b = 0
-                if current_rsi < 38: score_b += 1                     # Underlyings are technically oversold
-                if iv_rank_proxy > 0.65: score_b += 1                 # Implied Premium is highly jacked; edge to the option seller
-                if alpha > -0.15: score_b += 1                        # Not trapped in an unbacked terminal death spiral
-                
+                if current_rsi < 38: score_b += 1       # Deep technical pullback
+                if iv_rank_proxy > 0.65: score_b += 1   # Rich options premium relative to historical movement
+                if alpha > -0.15: score_b += 1          # Avoiding extreme operational free-fall names
+
                 metrics = {
                     "Price": f"${current_price:,.2f}", "Alpha": alpha, "RSI": int(current_rsi),
                     "IVRank": f"{iv_rank_proxy * 100:.0f}%", "StrikeFloor": f"${strike_floor:,.2f}",
@@ -193,9 +193,9 @@ def main():
         except Exception:
             continue
 
-    # Sort structures logically by edge parameters
-    group_a_pool.sort(key=lambda x: x[1]["Alpha"], reverse=True)    # Highest relative alpha runners first
-    group_b_pool.sort(key=lambda x: x[1]["RawIVRank"], reverse=True) # Juiciest premium opportunities ranked at the top
+    # Sort layouts by analytical priorities
+    group_a_pool.sort(key=lambda x: x[1]["Alpha"], reverse=True)     # Best total alpha runners top the group
+    group_b_pool.sort(key=lambda x: x[1]["RawIVRank"], reverse=True)  # Juiciest options premium options ranked first
 
     matrix_output = build_markdown_matrix(group_a_pool[:15], group_b_pool[:15])
     print(matrix_output)
