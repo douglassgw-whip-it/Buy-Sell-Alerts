@@ -10,7 +10,6 @@ from email.mime.multipart import MIMEMultipart
 # 1. DYNAMIC MULTI-INDEX UNIVERSE SCRAPER
 # ==========================================
 def fetch_broad_market_universe():
-    """Dynamically scrapes S&P 500 and Nasdaq-100 rosters simultaneously."""
     print("Executing broad extraction of institutional indices...")
     tickers = []
     
@@ -34,10 +33,10 @@ def fetch_broad_market_universe():
     except Exception as e:
         print(f"⚠️ NASDAQ-100 scrape bypassed: {e}")
 
-    # Index Benchmarks & Watchlist fallbacks
+    # Manual Watchlist Fallbacks
     macro_anchors = ["QQQ", "IWM", "DIA", "RKLB", "PLTR", "BBAI", "VLN", "ACHR"]
     full_universe = list(set(macro_anchors + tickers))
-    print(f"📊 Broad Engine Complete. Total components to batch download: {len(full_universe)}")
+    print(f"📊 Total components found: {len(full_universe)}")
     return full_universe
 
 # ==========================================
@@ -80,12 +79,12 @@ def send_matrix_email(matrix_text):
     body = f"Total-market multi-index macro scan complete. Optimized options setups:\n\n{matrix_text}"
     msg.attach(MIMEText(body, "plain"))
 
-    print("Opening secure SSL pipeline tunnel to smtp.gmail.com:465...")
+    print("Opening secure SSL pipeline tunnel...")
     server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15)
     server.login(smtp_user, smtp_pass)
     server.sendmail(smtp_user, to_email, msg.as_string())
     server.quit()
-    print("✨ SUCCESS: Macro Matrix data package emailed successfully!")
+    print("✨ SUCCESS: Report delivered.")
 
 # ==========================================
 # 4. EXECUTION DISPATCH MATRIX
@@ -93,46 +92,51 @@ def send_matrix_email(matrix_text):
 def main():
     print("🚀 BOOTING BROAD NETWORK INDEX EXTRACTION PROCESSING ENGINE")
     
-    # Download single baseline reference benchmark to avoid any structural errors
-    spy_df = yf.download("SPY", period="1y", interval="1d", progress=False, multi_level_index=False)
-    spy_df.columns = [str(col).strip() for col in spy_df.columns]
-    spy_close = spy_df['Close'].dropna()
-    spy_returns = spy_close.pct_change().dropna()
-    spy_cum = (1 + spy_returns).prod() - 1
-    spy_vol_20d = spy_returns.tail(20).std() * np.sqrt(252)
-
     watchlist = fetch_broad_market_universe()
+    if "SPY" not in watchlist:
+        watchlist.append("SPY")
+        
+    print("Downloading entire universe in ONE SINGLE combined batch request...")
+    # Using group_by="ticker" makes parsing massive multi-ticker data infinitely simpler and bulletproof
+    all_data = yf.download(watchlist, period="1y", interval="1d", progress=False, group_by="ticker")
     
-    print("Initializing robust batch fetch engine...")
-    batch_tickers = yf.Tickers(" ".join(watchlist))
-    
+    # Isolate SPY baseline reference
+    try:
+        spy_close = all_data["SPY"]["Close"].dropna()
+        spy_returns = spy_close.pct_change().dropna()
+        spy_cum = (1 + spy_returns).prod() - 1
+        spy_vol_20d = spy_returns.tail(20).std() * np.sqrt(252)
+    except Exception as e:
+        print(f"❌ Failed to parse SPY benchmark data: {e}")
+        return
+
     group_a_pool = []
     group_b_pool = []
 
-    print("Extracting metrics from individual dataset footprints...")
+    print("Parsing down individual historical footprints from local data memory...")
     for ticker in watchlist:
         if ticker == "SPY":
             continue
         try:
-            # Safely fetch each ticker's dedicated DataFrame directly from the batch object
-            df = batch_tickers.tickers[ticker].history(period="1y", interval="1d", raised=False)
-            if df.empty or len(df) < 50:
+            # Grab ticker's slice directly from the massive local table
+            if ticker not in all_data.columns.levels[0]:
+                continue
+                
+            ticker_df = all_data[ticker].dropna(subset=["Close"])
+            if len(ticker_df) < 50:
                 continue
 
-            # Ensure consistent column naming format
-            df.columns = [str(col).strip() for col in df.columns]
-            
-            close_series = df['Close'].dropna()
-            volume_series = df['Volume'].dropna()
-            high_series = df['High'].dropna()
-            low_series = df['Low'].dropna()
+            close_series = ticker_df['Close']
+            volume_series = ticker_df['Volume']
+            high_series = ticker_df['High']
+            low_series = ticker_df['Low']
 
-            # 1. LIQUIDITY FILTER
+            # 1. LIQUIDITY FILTER (Skip illiquid tickers)
             avg_volume_10d = volume_series.tail(10).mean()
             if avg_volume_10d < 1000000:
                 continue
 
-            # Align vectors with SPY
+            # Align vectors with SPY index
             combined_stock_spy = pd.concat([close_series.rename('Stock'), spy_close.rename('SPY')], axis=1).dropna()
             stock_returns = combined_stock_spy['Stock'].pct_change().dropna()
             
