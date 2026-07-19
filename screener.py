@@ -6,6 +6,9 @@ import yfinance as yf
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# ==========================================
+# 1. INSTITUTIONAL LIQUIDITY UNIVERSE MIRROR
+# ==========================================
 def fetch_options_universe():
     print("Initializing high-liquidity multi-index universe...")
     tickers = []
@@ -24,6 +27,9 @@ def fetch_options_universe():
     core_anchors = ["QQQ", "IWM", "DIA", "RKLB", "PLTR", "BBAI", "VLN", "ACHR", "JEPI", "JEPQ"]
     return list(set(core_anchors + tickers))
 
+# ==========================================
+# 2. MARKDOWN RENDER PIPELINE
+# ==========================================
 def build_markdown_matrix(group_a, group_b, group_c):
     output = "## OPTIMIZED 30-45D OPTIONS SCORING MATRIX\n"
     output += "=======================================================================\n\n"
@@ -52,6 +58,9 @@ def build_markdown_matrix(group_a, group_b, group_c):
 
     return output
 
+# ==========================================
+# 3. SECURE REPO-SECRETS SMTP TUNNEL
+# ==========================================
 def send_matrix_email(matrix_text):
     smtp_user = os.environ.get("EMAIL_USER")
     smtp_pass = os.environ.get("EMAIL_PASSWORD")
@@ -66,9 +75,13 @@ def send_matrix_email(matrix_text):
         server.login(smtp_user, smtp_pass)
         server.sendmail(smtp_user, to_email, msg.as_string())
 
+# ==========================================
+# 4. DATA ENGINE & CORE SIGNAL LOGIC
+# ==========================================
 def main():
     spy_df = yf.download("SPY", period="1y", interval="1d", progress=False, auto_adjust=False)
-    spy_close = spy_df['Adj Close'].iloc[:, 0].dropna()
+    if isinstance(spy_df.columns, pd.MultiIndex): spy_df.columns = spy_df.columns.get_level_values(0)
+    spy_close = spy_df['Adj Close'].dropna()
     spy_cum = (1 + spy_close.pct_change().dropna()).prod() - 1
     spy_20d_ret = (spy_close.iloc[-1] / spy_close.iloc[-21]) - 1
 
@@ -80,34 +93,52 @@ def main():
         try:
             df = yf.download(ticker, period="1y", interval="1d", progress=False, auto_adjust=False)
             if df.empty or len(df) < 60: continue
-            close = df['Adj Close'].iloc[:, 0]
-            vol = df['Volume'].iloc[:, 0]
-            high = df['High'].iloc[:, 0]
-            low = df['Low'].iloc[:, 0]
+            if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+            
+            close = df['Adj Close']
+            vol = df['Volume']
+            high = df['High']
+            low = df['Low']
 
             if vol.tail(20).mean() < 2500000: continue
             curr_p = close.iloc[-1]
             
-            # Indicators
-            rsi = 100 - (100 / (1 + (close.diff().clip(lower=0).rolling(14).mean() / (-close.diff().clip(upper=0).rolling(14).mean()))))
+            # --- CALCULATE INDICATORS ---
+            delta = close.diff()
+            rsi = 100 - (100 / (1 + (delta.clip(lower=0).rolling(14).mean() / (-delta.clip(upper=0).rolling(14).mean()))))
+            curr_rsi = rsi.iloc[-1] if not np.isnan(rsi.iloc[-1]) else 50.0
+            
+            # --- GROUP C: BREAKOUT LOGIC ---
             sma_50 = close.rolling(50).mean().iloc[-1]
             high_20d = high.rolling(20).max().shift(1).iloc[-1]
             vol_avg_20 = vol.rolling(20).mean().iloc[-1]
-            
-            # Refinement Logic (Group C)
             std_20 = close.rolling(20).std()
             bandwidth = (std_20 * 2) / close.rolling(20).mean()
             is_tight = bandwidth.iloc[-1] < bandwidth.rolling(20).mean().iloc[-1]
             rel_strength = (curr_p / close.iloc[-21]) - 1
             
-            if curr_p > high_20d and vol.iloc[-1] >= (1.5 * vol_avg_20) and 50 <= rsi.iloc[-1] <= 72 and curr_p > sma_50 and is_tight and rel_strength > spy_20d_ret:
-                group_c_pool.append((ticker, {"Price": f"${curr_p:,.2f}", "RSI": int(rsi.iloc[-1]), "VolumeRel": f"{vol.iloc[-1]/vol_avg_20:.1f}x", "RelStrength": f"{rel_strength:.1%}"}))
+            if curr_p > high_20d and vol.iloc[-1] >= (1.5 * vol_avg_20) and 50 <= curr_rsi <= 72 and curr_p > sma_50 and is_tight and rel_strength > spy_20d_ret:
+                group_c_pool.append((ticker, {"Price": f"${curr_p:,.2f}", "RSI": int(curr_rsi), "VolumeRel": f"{vol.iloc[-1]/vol_avg_20:.1f}x", "RelStrength": f"{rel_strength:.1%}"}))
 
-            # Legacy Logic (A/B)
-            # ... [Existing A/B logic remains unchanged] ...
+            # --- GROUP A/B: ORIGINAL SCORING LOGIC ---
+            alpha = ((1 + close.pct_change().dropna()).prod() - 1) - spy_cum
+            log_ret = np.log(close / close.shift(1)).dropna()
+            iv_rank_proxy = (log_ret.rolling(30).std().dropna() * np.sqrt(252) < (log_ret.rolling(30).std().iloc[-1] * np.sqrt(252))).sum() / len(log_ret.rolling(30).std().dropna())
+            atr_14 = pd.concat([high-low, (high-close.shift()).abs(), (low-close.shift()).abs()], axis=1).max(axis=1).rolling(14).mean().iloc[-1]
+            
+            if curr_rsi >= 50:
+                score_a = (1 if 55 < curr_rsi < 70 else 0) + (1 if alpha > 0.05 else 0) + (1 if iv_rank_proxy < 0.45 else 0)
+                group_a_pool.append((ticker, {"Price": f"${curr_p:,.2f}", "Alpha": alpha, "RSI": int(curr_rsi), "IVRank": f"{iv_rank_proxy * 100:.0f}%", "TargetStrike": f"${curr_p + atr_14:,.2f}", "Score": f"{score_a} / 3", "RawIVRank": iv_rank_proxy}))
+            else:
+                score_b = (1 if curr_rsi < 38 else 0) + (1 if iv_rank_proxy > 0.65 else 0) + (1 if alpha > -0.15 else 0)
+                group_b_pool.append((ticker, {"Price": f"${curr_p:,.2f}", "Alpha": alpha, "RSI": int(curr_rsi), "IVRank": f"{iv_rank_proxy * 100:.0f}%", "StrikeFloor": f"${curr_p - (2 * atr_14):,.2f}", "Score": f"{score_b} / 3", "RawIVRank": iv_rank_proxy}))
         except Exception: continue
 
+    group_a_pool.sort(key=lambda x: x[1]["Alpha"], reverse=True)
+    group_b_pool.sort(key=lambda x: x[1]["RawIVRank"], reverse=True)
+    
     matrix_output = build_markdown_matrix(group_a_pool[:15], group_b_pool[:15], group_c_pool)
+    print(matrix_output)
     send_matrix_email(matrix_output)
 
 if __name__ == "__main__":
